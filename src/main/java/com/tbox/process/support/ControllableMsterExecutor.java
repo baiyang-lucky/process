@@ -3,14 +3,16 @@ package com.tbox.process.support;
 import com.tbox.process.MasterPuller;
 import com.tbox.process.Worker;
 import com.tbox.process.exception.ExecutorException;
-import com.tbox.process.type.EventState;
-import com.tbox.process.type.ProcessState;
+import com.tbox.process.type.Event;
+import com.tbox.process.type.State;
+import com.tbox.process.type.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
@@ -31,43 +33,65 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
     /**
      * 当前状态
      */
-    private volatile ProcessState processState = ProcessState.INIT;
+    private final State state = State.INIT;
     /**
      * 状态机
      */
-    private volatile FSM fsm;
+    private final FSM fsm;
+    /**
+     * Master线程
+     */
+    private Thread masterTh;
     /**
      * 多线程等待通知
      */
-    private final ReentrantLock lock = new ReentrantLock();
-    private final Condition startNotify = lock.newCondition();
+    private final Tuple2<Lock, Condition> startNotify;
 
     public ControllableMsterExecutor(String name, ExecutorProperties processProperties, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
         super(name, processProperties, masterPuller, workerConsumer);
         this.semaphore = new Semaphore(0);
         this.fsm = new FSM(name);
+        ReentrantLock lock = new ReentrantLock();
+        startNotify = new Tuple2<>(lock, lock.newCondition());
     }
 
+    /**
+     * 创建Woker
+     */
     @Override
     protected Worker<T> doCreateWorker() {
         int wokerId = getWokerId();
         String workerName = String.format("Woker-%s-%d", name, wokerId);
         logger.info("Create woker[{}] .", workerName);
-        return new SimpleWoker<>(workerName, wokerId,
-                semaphore, fsm, lock, startNotify, this.dataQueue, this.workerConsumer, this.processProperties);
+        return new SimpleWoker.Builder<T>()
+                .name(workerName)
+                .workerId(wokerId)
+                .fsm(fsm)
+                .semaphore(semaphore)
+                .startNotify(startNotify)
+                .dataQueue(dataQueue)
+                .workerConsumer(workerConsumer)
+                .processProperties(processProperties)
+                .build();
     }
 
+    /**
+     * 移除Woker
+     */
     @Override
     protected void removeWorker(Worker<?> worker) {
-        SimpleWoker simpleWoker = (SimpleWoker) worker;
+        SimpleWoker<?> simpleWoker = (SimpleWoker<?>) worker;
         releaseWorkerId(simpleWoker.getWorkerId());//释放workerId，在后续新创建worker时可以复用
         super.removeWorker(worker);
     }
 
+    /**
+     * 启动
+     */
     @Override
     public void start() {
         synchronized (this) {
-            if (this.fsm.processState() == ProcessState.INIT) { // 如果是初始状态
+            if (this.fsm.state() == State.INIT) { // 如果是初始状态
                 this.fsm.ready(() -> { //执行就绪
                     for (int i = 0; i < processProperties.getCoreWorkerSize(); i++) {
                         createWorker().start();
@@ -75,26 +99,33 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
                 });
             }
             this.fsm.start(() -> { //启动
+                if (masterTh == null) { //如果Master线程为空，则表明第一次启动，需要创建Master线程
+                    masterTh = new Thread(this::masterExecute);
+                    masterTh.setDaemon(true);
+                    masterTh.start(); //启动主线程
+                }
                 try {
-                    lock.lock();
-                    startNotify.signalAll(); //通知所有woker继续
+                    startNotify.t1.lock();
+                    startNotify.t2.signalAll(); //通知所有woker继续
                 } finally {
-                    lock.unlock();
+                    startNotify.t1.unlock();
                 }
             });
         }
-        new Thread(this::execute).start(); //启动主线程
     }
 
-    private void execute() {
+    /**
+     * Master线程执行体
+     */
+    private void masterExecute() {
         while (true) {
             System.out.println("Master:" + fsm.eventState().name() + ":" + dataQueue.size());
-            if (fsm.eventState() == EventState.RUN) {
+            if (fsm.eventState() == Event.RUN) {
                 executeOnece((restDatas) -> {
                     //full back 处理
                     logger.debug("队列满，剩余未处理：" + restDatas.size());
                     for (T restData : restDatas) {
-                        if (processState == ProcessState.SHUTDOWN) {
+                        if (state == State.SHUTDOWN) {
                             logger.info("Take shutdown signal，stop full back process.");
                             break;
                         }
@@ -109,20 +140,20 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
                     }
                     logger.debug("full back结束：" + restDatas);
                 });
-            } else if (fsm.eventState() == EventState.SHUTDOWN_NOW || fsm.eventState() == EventState.SHUTDOWN) { //关闭
+            } else if (fsm.eventState() == Event.SHUTDOWN_NOW || fsm.eventState() == Event.SHUTDOWN) { //关闭
                 logger.info("Master[{}] take shutdown signal.", name);
                 break;
-            } else if (fsm.eventState() == EventState.STOP || fsm.eventState() == EventState.STOP_NOW) {//停止
+            } else if (fsm.eventState() == Event.STOP || fsm.eventState() == Event.STOP_NOW) {//停止
                 logger.info("Master[{}] take stop signal.", name);
                 try {
-                    lock.lock();
-                    startNotify.await(2, TimeUnit.SECONDS);
+                    startNotify.t1.lock();
+                    startNotify.t2.await(2, TimeUnit.SECONDS);
                 } catch (InterruptedException e) {
                     logger.error("Master[{}] InterruptedException.", name);
                     this.shutdown(); // 关闭
                     throw new ExecutorException(String.format("Master[%s] fullback trigger InterruptedException", name));
                 } finally {
-                    lock.unlock();
+                    startNotify.t1.unlock();
                 }
             }
         }
@@ -140,64 +171,91 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
         }
     }
 
+    /**
+     * 停止，等待worker完成当前任务。
+     * 可恢复运行。
+     */
     @Override
     public synchronized void stop() {
         this.fsm.stop(() -> {
         });
     }
 
+    /**
+     * 立马停止，队列中有数据也不会继续消费。
+     * 可恢复运行。
+     */
     @Override
     public synchronized void stopNow() {
         this.fsm.stopNow(() -> {
         });
     }
 
+    /**
+     * 关闭，等待Worker停止，内存回收。
+     */
     @Override
     public synchronized void shutdown() {
-        this.fsm.shutdown(() -> {
-            for (Worker<T> worker : workers) {
-                SimpleWoker simpleWoker = (SimpleWoker) worker;
-                if (simpleWoker.isAlive()) {
-                    try {
-                        simpleWoker.join();
-                    } catch (InterruptedException e) {
-                    }
-                }
-            }
-            workers.clear();
-        });
+        this.fsm.shutdown(this::waitAllThreadShutdown);
     }
 
+    /**
+     * 立即关闭，所有Worker停止，内存回收。
+     */
     @Override
     public synchronized void shutdownNow() {
         this.fsm.shutdownNow(() -> {
             dataQueue.clear();
-            for (Worker<T> worker : workers) {
-                SimpleWoker simpleWoker = (SimpleWoker) worker;
-                if (simpleWoker.isAlive()) {
-                    try {
-                        simpleWoker.join();
-                    } catch (InterruptedException e) {
-                    }
-                }
-            }
-            workers.clear();
+            waitAllThreadShutdown();
         });
     }
 
-    public ProcessState getState() {
-        return processState;
+    /**
+     * 等待所有线程消亡
+     */
+    private void waitAllThreadShutdown() {
+        try {
+            // 等待Master结束
+            if (masterTh != null) {
+                if (masterTh.isAlive()) {
+                    masterTh.join();
+                }
+                masterTh = null;
+            }
+            // 等待Woker结束
+            for (Worker<T> worker : workers) {
+                SimpleWoker<T> simpleWoker = (SimpleWoker<T>) worker;
+                if (simpleWoker.isAlive()) {
+                    simpleWoker.join();
+                }
+            }
+        } catch (InterruptedException e) {
+        }
+        workers.clear();
     }
 
+    /**
+     * 获取当前状态
+     */
+    public State getState() {
+        return state;
+    }
+
+    /**
+     * 获取workerId
+     */
     private synchronized int getWokerId() {
         int i = 0;
-        for (; ((workerIdFlag >> i) & 1) != 0; ) {
+        while (((workerIdFlag >> i) & 1) != 0) {
             i++;
         }
         workerIdFlag |= 1 << i;
         return i + 1;
     }
 
+    /**
+     * 释放归还workerId
+     */
     private synchronized void releaseWorkerId(int workerId) {
         workerIdFlag &= ~(1 << (workerId - 1));
     }

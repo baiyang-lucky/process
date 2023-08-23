@@ -2,8 +2,11 @@ package com.tbox.process.type;
 
 /**
  * 状态
+ *
+ * @author 白杨
+ * DateTime:2023/8/22 10:43
  */
-public enum ProcessState {
+public enum State {
     /**
      * 初始，还未达到运行条件，运行需初始化。
      */

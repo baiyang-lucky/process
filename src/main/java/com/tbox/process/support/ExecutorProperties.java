@@ -1,5 +1,11 @@
 package com.tbox.process.support;
 
+/**
+ * 执行器属性配置
+ *
+ * @author 白杨
+ * DateTime:2023/8/22 10:43
+ */
 public class ExecutorProperties {
     /**
      * 数据队列大小
@@ -85,7 +91,7 @@ public class ExecutorProperties {
     }
 
     public static class Builder {
-        private ExecutorProperties processProperties = new ExecutorProperties();
+        private final ExecutorProperties processProperties = new ExecutorProperties();
 
         public Builder queueSize(int queueSize) {
             processProperties.setQueueSize(queueSize);

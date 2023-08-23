@@ -1,7 +1,8 @@
 package com.tbox.process.support;
 
 import com.tbox.process.Worker;
-import com.tbox.process.type.EventState;
+import com.tbox.process.type.Event;
+import com.tbox.process.type.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,7 +10,7 @@ import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
 
 /**
@@ -43,8 +44,7 @@ public class SimpleWoker<T> extends Thread implements Worker<T> {
     /**
      * 多线程等待通知
      */
-    private final ReentrantLock lock;
-    private final Condition startNotify;
+    private final Tuple2<Lock, Condition> startNotify;
     /**
      * worker信号量
      */
@@ -52,9 +52,9 @@ public class SimpleWoker<T> extends Thread implements Worker<T> {
     /**
      * 状态机
      */
-    private volatile FSM fsm;
+    private final FSM fsm;
 
-    public SimpleWoker(String name, int workerId, Semaphore semaphore, FSM fsm, ReentrantLock lock, Condition startNotify,
+    public SimpleWoker(String name, int workerId, Semaphore semaphore, FSM fsm, Tuple2<Lock, Condition> startNotify,
                        LinkedBlockingDeque<T> dataQueue, Consumer<T> workerConsumer, ExecutorProperties processProperties) {
         super(name);
         this.workerId = workerId;
@@ -63,7 +63,6 @@ public class SimpleWoker<T> extends Thread implements Worker<T> {
         this.fsm = fsm;
         this.workerConsumer = workerConsumer;
         this.processProperties = processProperties;
-        this.lock = lock;
         this.startNotify = startNotify;
     }
 
@@ -76,7 +75,7 @@ public class SimpleWoker<T> extends Thread implements Worker<T> {
         while (true) {
             semaphore.release(); //释放信号量+1
             try {
-                if (fsm.eventState() == EventState.RUN) { //运行
+                if (fsm.eventState() == Event.RUN) { //运行
                     T data = dataQueue.poll(processProperties.getWorkerPullTimeout(), TimeUnit.MILLISECONDS);
                     if (data != null) {
                         logger.info("Woker[{}]:{}", getName(), dataQueue.size());
@@ -85,18 +84,18 @@ public class SimpleWoker<T> extends Thread implements Worker<T> {
                     }
                 }
 
-                if (fsm.eventState() == EventState.SHUTDOWN_NOW) { // 立马关闭：直接结束线程
+                if (fsm.eventState() == Event.SHUTDOWN_NOW) { // 立马关闭：直接结束线程
                     logger.info("Woker[{}] take shutdown_now signal.", getName());
                     break;
-                } else if (fsm.eventState() == EventState.SHUTDOWN) { // 关闭：消费完当前队列，然后结束线程
+                } else if (fsm.eventState() == Event.SHUTDOWN) { // 关闭：消费完当前队列，然后结束线程
                     logger.info("Woker[{}] take shutdown signal.", getName());
                     fastConsume(); //快速消费，不阻塞，获取null直接结束
                     break;
-                } else if (fsm.eventState() == EventState.STOP) { // 停止：消费完队列数据，然后等待Master启动信号
+                } else if (fsm.eventState() == Event.STOP) { // 停止：消费完队列数据，然后等待Master启动信号
                     logger.info("Woker[{}] take stop signal.", getName());
                     fastConsume(); //快速消费，不阻塞，获取null直接结束
                     this.awaitStart(); //等待启动
-                } else if (fsm.eventState() == EventState.STOP_NOW) { //立马停止：停止消费，直接等待Master启动信号
+                } else if (fsm.eventState() == Event.STOP_NOW) { //立马停止：停止消费，直接等待Master启动信号
                     logger.info("Woker[{}] take stop_now signal.", getName());
                     this.awaitStart(); //等待启动
                 }
@@ -118,14 +117,71 @@ public class SimpleWoker<T> extends Thread implements Worker<T> {
 
     public void awaitStart() throws InterruptedException {
         try {
-            lock.lock();
-            this.startNotify.await(3, TimeUnit.SECONDS);//等待启动通知
+            this.startNotify.t1.lock();
+            this.startNotify.t2.await(3, TimeUnit.SECONDS);//等待启动通知
         } finally {
-            lock.unlock();
+            this.startNotify.t1.unlock();
         }
     }
 
     public int getWorkerId() {
         return workerId;
+    }
+
+    public static class Builder<T> {
+        private String name;
+        private LinkedBlockingDeque<T> dataQueue;
+        private Consumer<T> workerConsumer;
+        private int workerId;
+        private ExecutorProperties processProperties;
+        private Tuple2<Lock, Condition> startNotify;
+        private Semaphore semaphore;
+        private FSM fsm;
+
+        public Builder<T> name(String name) {
+            this.name = name;
+            return this;
+        }
+
+        public Builder<T> dataQueue(LinkedBlockingDeque<T> dataQueue) {
+            this.dataQueue = dataQueue;
+            return this;
+        }
+
+        public Builder<T> workerConsumer(Consumer<T> workerConsumer) {
+            this.workerConsumer = workerConsumer;
+            return this;
+        }
+
+        public Builder<T> workerId(int workerId) {
+            this.workerId = workerId;
+            return this;
+        }
+
+        public Builder<T> processProperties(ExecutorProperties processProperties) {
+            this.processProperties = processProperties;
+            return this;
+        }
+
+        public Builder<T> startNotify(Tuple2<Lock, Condition> startNotify) {
+            this.startNotify = startNotify;
+            return this;
+        }
+
+        public Builder<T> semaphore(Semaphore semaphore) {
+            this.semaphore = semaphore;
+            return this;
+        }
+
+        public Builder<T> fsm(FSM fsm) {
+            this.fsm = fsm;
+            return this;
+        }
+
+        public SimpleWoker<T> build() {
+            return new SimpleWoker<>(this.name, this.workerId, this.semaphore,
+                    this.fsm, this.startNotify, this.dataQueue, this.workerConsumer, this.processProperties);
+        }
+
     }
 }

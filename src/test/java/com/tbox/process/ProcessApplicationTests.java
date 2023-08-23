@@ -1,12 +1,12 @@
 package com.tbox.process;
 
-import com.tbox.process.type.EventState;
+import com.tbox.process.type.Event;
 
 import java.util.concurrent.LinkedBlockingDeque;
 
 class ProcessApplicationTests {
-    public static void test(EventState state){
-        state = EventState.RUN;
+    public static void test(Event state){
+        state = Event.RUN;
     }
     public static void main(String[] args) throws InterruptedException {
 //        EventState state = EventState.STOP;

@@ -2,8 +2,11 @@ package com.tbox.process.type;
 
 /**
  * 执行状态
+ *
+ * @author 白杨
+ * DateTime:2023/8/22 10:43
  */
-public enum EventState {
+public enum Event {
     /**
      * 运行
      */

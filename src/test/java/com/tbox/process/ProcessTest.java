@@ -11,7 +11,7 @@ public class ProcessTest {
 
         ControllableMsterExecutor<Book> printTask = new ControllableMsterExecutor.Builder<Book>().name("print_task")
                 .processProperties(ExecutorProperties.builder()
-                        .queueSize(500)
+                        .queueSize(200)
                         .coreWorkerSize(1)
                         .maxWorkderSize(5)
                         .build())
@@ -31,8 +31,17 @@ public class ProcessTest {
                 })
                 .build();
         printTask.start();
-//        Thread.sleep(1000);
+        Thread.sleep(1000);
         printTask.stop();
+        Thread.sleep(2000);
+        printTask.start();
+        Thread.sleep(1000);
+        printTask.stopNow();
+        Thread.sleep(1000);
+        printTask.start();
+        Thread.sleep(1000);
+        printTask.shutdown();
+        Thread.sleep(5000);
 //        System.out.println();
 //        Scanner scanner = new Scanner(System.in);
 //        scanner.next();
