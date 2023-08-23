@@ -8,7 +8,7 @@ import com.tbox.process.type.State;
  * 执行器状态机
  * 维护事件与执行状态
  */
-public class FSM {
+final class FSM {
     private final String name;
     private volatile Event event = Event.STOP;
     private volatile State state = State.INIT;
@@ -17,7 +17,7 @@ public class FSM {
         this.name = name;
     }
 
-    public Event eventState() {
+    public Event event() {
         return event;
     }
 
@@ -43,7 +43,7 @@ public class FSM {
         if (state == State.SHUTDOWN) { //关闭状态
             throw new ExecutorStateException(String.format("FSM[%s] already shutdown.", name));
         }
-        event = Event.RUN; //执行状态设置为RUN (通知Woker)
+        event = Event.RUN; //执行状态设置为RUN (通知Worker)
         action.handle();
         state = State.RUNNING; // 切换状态为运行中
     }
@@ -67,19 +67,19 @@ public class FSM {
         if (state == State.SHUTDOWN) { //关闭状态
             throw new ExecutorStateException(String.format("FSM[%s] already shutdown.", name));
         }
-        event = Event.STOP_NOW;// 执行状态设置为STOP_NOW (通知Woker)
+        event = Event.STOP_NOW;// 执行状态设置为STOP_NOW (通知Worker)
         action.handle();
         state = State.STOP; // 停止
     }
 
     public void shutdown(Action action) {
-        event = Event.SHUTDOWN;// 执行状态设置为SHUTDOWN (通知Woker)
+        event = Event.SHUTDOWN;// 执行状态设置为SHUTDOWN (通知Worker)
         action.handle();
         state = State.SHUTDOWN;//关闭
     }
 
     public void shutdownNow(Action action) {
-        event = Event.SHUTDOWN_NOW;// 执行状态设置为SHUTDOWN_NOW (通知Woker)
+        event = Event.SHUTDOWN_NOW;// 执行状态设置为SHUTDOWN_NOW (通知Worker)
         action.handle();
         state = State.SHUTDOWN;//关闭
     }

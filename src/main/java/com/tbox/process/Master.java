@@ -2,6 +2,11 @@ package com.tbox.process;
 
 public interface Master<T> {
     /**
+     * 获取master名称
+     */
+    String getName();
+
+    /**
      * 创建Worker对象
      */
     Worker<T> createWorker();

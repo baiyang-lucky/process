@@ -17,7 +17,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 /**
- * 可控制的MasterExecutor。提供了启动、停止、关闭等控制操作。内部维护了FSM状态机，用来实现状态控制流转。根据当前Woker繁忙程度来动态创建Woker。
+ * 可控制的MasterExecutor。提供了启动、停止、关闭等控制操作。内部维护了FSM状态机，用来实现状态控制流转。根据当前Worker繁忙程度来动态创建Worker。
  * Master拉取数据为独立的线程。
  *
  * @author 白杨
@@ -53,19 +53,21 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
         this.fsm = new FSM(name);
         ReentrantLock lock = new ReentrantLock();
         startNotify = new Tuple2<>(lock, lock.newCondition());
+        //注册当前执行器到全局
+        GlobalExecutorRegistry.registe(this, new ExecutorContext(name, this.dataQueue, workers, fsm, processProperties));
     }
 
     /**
-     * 创建Woker
+     * 创建Worker
      */
     @Override
     protected Worker<T> doCreateWorker() {
-        int wokerId = getWokerId();
-        String workerName = String.format("Woker-%s-%d", name, wokerId);
-        logger.info("Create woker[{}] .", workerName);
-        return new SimpleWoker.Builder<T>()
+        int workerId = getWorkerId();
+        String workerName = String.format("Worker-%s-%d", name, workerId);
+        logger.info("Create Worker[{}] .", workerName);
+        return new SimpleWorker.Builder<T>()
                 .name(workerName)
-                .workerId(wokerId)
+                .workerId(workerId)
                 .fsm(fsm)
                 .semaphore(semaphore)
                 .startNotify(startNotify)
@@ -76,12 +78,12 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
     }
 
     /**
-     * 移除Woker
+     * 移除Worker
      */
     @Override
     protected void removeWorker(Worker<?> worker) {
-        SimpleWoker<?> simpleWoker = (SimpleWoker<?>) worker;
-        releaseWorkerId(simpleWoker.getWorkerId());//释放workerId，在后续新创建worker时可以复用
+        SimpleWorker<?> simpleWorker = (SimpleWorker<?>) worker;
+        releaseWorkerId(simpleWorker.getWorkerId());//释放workerId，在后续新创建worker时可以复用
         super.removeWorker(worker);
     }
 
@@ -106,7 +108,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
                 }
                 try {
                     startNotify.t1.lock();
-                    startNotify.t2.signalAll(); //通知所有woker继续
+                    startNotify.t2.signalAll(); //通知所有Worker继续
                 } finally {
                     startNotify.t1.unlock();
                 }
@@ -119,8 +121,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
      */
     private void masterExecute() {
         while (true) {
-            System.out.println("Master:" + fsm.eventState().name() + ":" + dataQueue.size());
-            if (fsm.eventState() == Event.RUN) {
+            if (fsm.event() == Event.RUN) {
                 executeOnece((restDatas) -> {
                     //full back 处理
                     logger.debug("队列满，剩余未处理：" + restDatas.size());
@@ -140,10 +141,10 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
                     }
                     logger.debug("full back结束：" + restDatas);
                 });
-            } else if (fsm.eventState() == Event.SHUTDOWN_NOW || fsm.eventState() == Event.SHUTDOWN) { //关闭
+            } else if (fsm.event() == Event.SHUTDOWN_NOW || fsm.event() == Event.SHUTDOWN) { //关闭
                 logger.info("Master[{}] take shutdown signal.", name);
                 break;
-            } else if (fsm.eventState() == Event.STOP || fsm.eventState() == Event.STOP_NOW) {//停止
+            } else if (fsm.event() == Event.STOP || fsm.event() == Event.STOP_NOW) {//停止
                 logger.info("Master[{}] take stop signal.", name);
                 try {
                     startNotify.t1.lock();
@@ -161,12 +162,12 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
     }
 
     /**
-     * 检查当前Woker是否有空闲，如果没有空闲并且woker数量没有达到最大数，则创建woker
+     * 检查当前Worker是否有空闲，如果没有空闲并且Worker数量没有达到最大数，则创建Worker
      */
     @Override
     protected void putQueueBefore(T data) {
         // 如果核心worker处于繁忙，并且当期worker数小于最大数,则创建新worker
-        if (!semaphore.tryAcquire() && workers.size() < processProperties.getMaxWorkderSize()) {
+        if (!semaphore.tryAcquire() && workers.size() < processProperties.getMaxWorkerSize()) {
             createWorker().start(); // 创建worker并启动
         }
     }
@@ -222,11 +223,11 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
                 }
                 masterTh = null;
             }
-            // 等待Woker结束
-            for (Worker<T> worker : workers) {
-                SimpleWoker<T> simpleWoker = (SimpleWoker<T>) worker;
-                if (simpleWoker.isAlive()) {
-                    simpleWoker.join();
+            // 等待Worker结束
+            for (Worker<?> worker : workers) {
+                SimpleWorker<?> simpleWorker = (SimpleWorker<?>) worker;
+                if (simpleWorker.isAlive()) {
+                    simpleWorker.join();
                 }
             }
         } catch (InterruptedException e) {
@@ -244,7 +245,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
     /**
      * 获取workerId
      */
-    private synchronized int getWokerId() {
+    private synchronized int getWorkerId() {
         int i = 0;
         while (((workerIdFlag >> i) & 1) != 0) {
             i++;
@@ -263,7 +264,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
 
     public static class Builder<T> {
         private String name;
-        private ExecutorProperties processProperties;
+        private ExecutorProperties executorProperties;
         private MasterPuller<T> masterPuller;
         private Consumer<T> workerConsumer;
 
@@ -272,8 +273,8 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
             return this;
         }
 
-        public Builder<T> processProperties(ExecutorProperties processProperties) {
-            this.processProperties = processProperties;
+        public Builder<T> executorProperties(ExecutorProperties executorProperties) {
+            this.executorProperties = executorProperties;
             return this;
         }
 
@@ -289,8 +290,8 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
 
 
         public ControllableMsterExecutor<T> build() {
-            if (processProperties == null) {
-                processProperties = new ExecutorProperties();
+            if (executorProperties == null) {
+                executorProperties = new ExecutorProperties();
             }
             if (masterPuller == null) {
                 throw new ExecutorException("masterPuller is require.");
@@ -298,7 +299,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
             if (workerConsumer == null) {
                 throw new ExecutorException("workerConsumer is require.");
             }
-            return new ControllableMsterExecutor<T>(name, processProperties, masterPuller, workerConsumer);
+            return new ControllableMsterExecutor<T>(name, executorProperties, masterPuller, workerConsumer);
         }
 
     }

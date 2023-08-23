@@ -12,7 +12,7 @@ import java.util.function.Consumer;
 /**
  * Master处理基础抽象
  * 维护了一个dataQueue用于Master与Worker之间的数据传输，以及属性配置。
- * 维护了Woker的创建与worker队列，具体Worker的创建由doCreateWorker()方法实现。
+ * 维护了Worker的创建与worker队列，具体Worker的创建由doCreateWorker()方法实现。
  * executeOnece()方法执行最基本的拉取数据放入队列的操作，已经队列满时的fullBack。
  *
  * @author 白杨
@@ -36,7 +36,7 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
     /**
      * 当前Master下Worker集合
      */
-    protected List<Worker<T>> workers;
+    protected List<Worker<?>> workers;
 
     /**
      * Master拉取器，用于从外部获取数据，由外部实现传入。
@@ -44,7 +44,7 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
     protected MasterPuller<T> masterPuller;
 
     /**
-     * Woker消费者
+     * Worker消费者
      */
     protected Consumer<T> workerConsumer;
 
@@ -52,7 +52,7 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
         this.name = name;
         this.processProperties = processProperties;
         this.dataQueue = new LinkedBlockingDeque<>(processProperties.getQueueSize());
-        this.workers = new ArrayList<>(processProperties.getMaxWorkderSize());
+        this.workers = new ArrayList<>(processProperties.getMaxWorkerSize());
         this.masterPuller = masterPuller;
         this.workerConsumer = workerConsumer;
     }
@@ -106,5 +106,9 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
         return true;
     }
 
+    @Override
+    public String getName() {
+        return this.name;
+    }
 
 }

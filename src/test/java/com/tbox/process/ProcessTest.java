@@ -9,16 +9,17 @@ import java.util.Random;
 public class ProcessTest {
     public static void main(String[] args) throws InterruptedException {
 
-        ControllableMsterExecutor<Book> printTask = new ControllableMsterExecutor.Builder<Book>().name("print_task")
-                .processProperties(ExecutorProperties.builder()
+        ControllableMsterExecutor<String> printTask = new ControllableMsterExecutor.Builder<String>()
+                .name("print_task")
+                .executorProperties(ExecutorProperties.builder()
                         .queueSize(200)
                         .coreWorkerSize(1)
                         .maxWorkderSize(5)
                         .build())
                 .masterPuller(() -> {
-                    ArrayList<Book> books = new ArrayList<>();
-                    books.add(new Book("baiyang"));
-                    System.out.println(Thread.currentThread().getName() + "拉取数据...");
+                    ArrayList<String> books = new ArrayList<>();
+                    books.add("baiyang");
+//                    System.out.println(Thread.currentThread().getName() + "拉取数据...");
                     return books;
                 })
                 .workerConsumer((data) -> {
@@ -27,13 +28,13 @@ public class ProcessTest {
                     } catch (InterruptedException e) {
                         throw new RuntimeException(e);
                     }
-                    System.out.println(Thread.currentThread().getName() + ":" + data);
+//                    System.out.println(Thread.currentThread().getName() + ":" + data);
                 })
                 .build();
         printTask.start();
         Thread.sleep(1000);
         printTask.stop();
-        Thread.sleep(2000);
+        Thread.sleep(5000);
         printTask.start();
         Thread.sleep(1000);
         printTask.stopNow();
@@ -42,30 +43,6 @@ public class ProcessTest {
         Thread.sleep(1000);
         printTask.shutdown();
         Thread.sleep(5000);
-//        System.out.println();
-//        Scanner scanner = new Scanner(System.in);
-//        scanner.next();
-//        printTask.stop();
-//        scanner.next();
-//        printTask.start();
-//        scanner.next();
-//        printTask.stopNow();
-//        scanner.next();
-//        printTask.shutdown();
     }
 }
 
-class Book {
-    public String name;
-
-    public Book(String name) {
-        this.name = name;
-    }
-
-    @Override
-    public String toString() {
-        return "Book{" +
-                "name='" + name + '\'' +
-                '}';
-    }
-}

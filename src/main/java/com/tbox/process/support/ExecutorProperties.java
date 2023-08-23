@@ -18,7 +18,7 @@ public class ExecutorProperties {
     /**
      * 最大Worker数
      */
-    private int maxWorkderSize = 5;
+    private int maxWorkerSize = 5;
 
     /**
      * fullBack之后尝试继续放入队列时间间隔
@@ -33,7 +33,7 @@ public class ExecutorProperties {
     private int workerPullTimeout = 500;
 
     /**
-     * 空闲Woker存活时间
+     * 空闲Worker存活时间
      */
     private int workerAlivetime = 20 * 1000;
 
@@ -54,12 +54,12 @@ public class ExecutorProperties {
         this.coreWorkerSize = coreWorkerSize;
     }
 
-    public int getMaxWorkderSize() {
-        return maxWorkderSize;
+    public int getMaxWorkerSize() {
+        return maxWorkerSize;
     }
 
-    public void setMaxWorkderSize(int maxWorkderSize) {
-        this.maxWorkderSize = maxWorkderSize;
+    public void setMaxWorkerSize(int maxWorkerSize) {
+        this.maxWorkerSize = maxWorkerSize;
     }
 
     public int getFullBackOfferTimeout() {
@@ -104,7 +104,7 @@ public class ExecutorProperties {
         }
 
         public Builder maxWorkderSize(int maxWorkderSize) {
-            processProperties.setMaxWorkderSize(maxWorkderSize);
+            processProperties.setMaxWorkerSize(maxWorkderSize);
             return this;
         }
 

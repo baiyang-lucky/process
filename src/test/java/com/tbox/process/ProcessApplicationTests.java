@@ -52,7 +52,7 @@ class ProcessApplicationTests {
 
     static int workerIdFlag = 0;
 
-    public static int getWokerId() {
+    public static int getWorkerId() {
         int i = 0;
         for (; ((workerIdFlag >> i) & 1) != 0; ) {
             i++;
