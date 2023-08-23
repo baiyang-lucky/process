@@ -24,18 +24,19 @@ public class ExecutorProperties {
      * fullBack之后尝试继续放入队列时间间隔
      * 单位：毫秒
      */
-    private int fullBackOfferTimeout = 500;
+    private long fullBackOfferTimeout = 500;
 
     /**
      * 工作者拉取数据超时时间
      * 单位：毫秒
      */
-    private int workerPullTimeout = 500;
+    private long workerPullTimeout = 500;
 
     /**
      * 空闲Worker存活时间
+     * 单位：毫秒
      */
-    private int workerAlivetime = 20 * 1000;
+    private long workerAlivetime = 20 * 1000;
 
 
     public int getQueueSize() {
@@ -62,27 +63,27 @@ public class ExecutorProperties {
         this.maxWorkerSize = maxWorkerSize;
     }
 
-    public int getFullBackOfferTimeout() {
+    public long getFullBackOfferTimeout() {
         return fullBackOfferTimeout > 0 ? fullBackOfferTimeout : 500; //当指定了fullBackOfferInterval则返回，否则返回默认100毫秒
     }
 
-    public void setFullBackOfferTimeout(int fullBackOfferTimeout) {
+    public void setFullBackOfferTimeout(long fullBackOfferTimeout) {
         this.fullBackOfferTimeout = fullBackOfferTimeout;
     }
 
-    public int getWorkerPullTimeout() {
+    public long getWorkerPullTimeout() {
         return workerPullTimeout > 0 ? workerPullTimeout : 500; //当指定了fullBackOfferInterval则返回，否则返回默认100毫秒
     }
 
-    public void setWorkerPullTimeout(int workerPullTimeout) {
+    public void setWorkerPullTimeout(long workerPullTimeout) {
         this.workerPullTimeout = workerPullTimeout;
     }
 
-    public int getWorkerAlivetime() {
+    public long getWorkerAlivetime() {
         return workerAlivetime > 0 ? workerAlivetime : 20 * 1000; //当指定了fullBackOfferInterval则返回，否则返回默认20s;
     }
 
-    public void setWorkerAlivetime(int workerAlivetime) {
+    public void setWorkerAlivetime(long workerAlivetime) {
         this.workerAlivetime = workerAlivetime;
     }
 
@@ -108,17 +109,17 @@ public class ExecutorProperties {
             return this;
         }
 
-        public Builder fullBackOfferTimeout(int fullBackOfferTimeout) {
+        public Builder fullBackOfferTimeout(long fullBackOfferTimeout) {
             processProperties.setFullBackOfferTimeout(fullBackOfferTimeout);
             return this;
         }
 
-        public Builder workerPullTimeout(int workerPullTimeout) {
+        public Builder workerPullTimeout(long workerPullTimeout) {
             processProperties.setWorkerPullTimeout(workerPullTimeout);
             return this;
         }
 
-        public Builder workerAlivetime(int workerAlivetime) {
+        public Builder workerAlivetime(long workerAlivetime) {
             processProperties.setWorkerAlivetime(workerAlivetime);
             return this;
         }

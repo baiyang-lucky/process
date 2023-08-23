@@ -35,7 +35,7 @@ public class MonitorTest {
         for (int i = 0; i < 5; i++) {
             tasks.add(createTask("task" + i, ExecutorProperties.builder()
                     .queueSize(2048)
-                    .coreWorkerSize(1)
+                    .coreWorkerSize(1 + i / 2)
                     .maxWorkderSize(1 + i)
                     .build()));
         }
@@ -43,26 +43,23 @@ public class MonitorTest {
             Thread.sleep(1000);
             task.start();
         }
-        tasks.clear();
-//        for (ControllableMsterExecutor<String> task : tasks) {
-//            Thread.sleep(1000);
-//            task.stop();
-//        }
-//        Thread.sleep(3000);
-//        for (ControllableMsterExecutor<String> task : tasks) {
-//            Thread.sleep(1000);
-//            task.start();
-//        }
-//        Iterator<ControllableMsterExecutor<String>> iterator = tasks.iterator();
-//        while (iterator.hasNext()) {
-//            ControllableMsterExecutor<String> task = iterator.next();
-//            Thread.sleep(1000);
-//            task.shutdown();
-//            iterator.remove();
-//            System.gc();
-//        }
-        System.gc();
-        System.gc();
+        for (ControllableMsterExecutor<String> task : tasks) {
+            Thread.sleep(1000);
+            task.stopNow();
+        }
+        Thread.sleep(3000);
+        for (ControllableMsterExecutor<String> task : tasks) {
+            Thread.sleep(1000);
+            task.start();
+        }
+        Iterator<ControllableMsterExecutor<String>> iterator = tasks.iterator();
+        while (iterator.hasNext()) {
+            ControllableMsterExecutor<String> task = iterator.next();
+            Thread.sleep(1000);
+            task.shutdown();
+            iterator.remove();
+            System.gc();
+        }
         Thread.sleep(1000 * 60);
     }
 

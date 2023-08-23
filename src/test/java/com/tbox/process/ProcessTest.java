@@ -12,23 +12,22 @@ public class ProcessTest {
         ControllableMsterExecutor<String> printTask = new ControllableMsterExecutor.Builder<String>()
                 .name("print_task")
                 .executorProperties(ExecutorProperties.builder()
-                        .queueSize(200)
-                        .coreWorkerSize(1)
-                        .maxWorkderSize(5)
+                        .queueSize(1024) //队列长度
+                        .coreWorkerSize(1) //核心worker数
+                        .maxWorkderSize(5) //最大worker数
+                        .workerAlivetime(20 * 1000) // woker空闲存活时间
                         .build())
-                .masterPuller(() -> {
+                .masterPuller(() -> { //Mster数据拉取
                     ArrayList<String> books = new ArrayList<>();
                     books.add("baiyang");
-//                    System.out.println(Thread.currentThread().getName() + "拉取数据...");
                     return books;
                 })
-                .workerConsumer((data) -> {
+                .workerConsumer((data) -> { //Worker数据消费
                     try {
                         Thread.sleep(new Random().nextInt(100));
                     } catch (InterruptedException e) {
                         throw new RuntimeException(e);
                     }
-//                    System.out.println(Thread.currentThread().getName() + ":" + data);
                 })
                 .build();
         printTask.start();

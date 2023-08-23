@@ -1,6 +1,7 @@
 package com.tbox.process.support;
 
 import com.tbox.process.Worker;
+import com.tbox.process.exception.ExecutorException;
 import com.tbox.process.type.Event;
 import com.tbox.process.type.Tuple2;
 import org.slf4j.Logger;
@@ -23,7 +24,9 @@ import java.util.function.Consumer;
  */
 public class SimpleWorker<T> extends Thread implements Worker<T> {
     private static final Logger logger = LoggerFactory.getLogger(SimpleWorker.class);
-
+    public static final int CORE_WOKER = 1; //核心woker 会一直存活
+    public static final int TEMPORARY_WORKER = 2; //临时worker 会首先存活时间
+    public final int curWokerRole; //当前woker角色：核心(CORE_WOKER)/临时(TEMPORARY_WORKER)
     /**
      * 数据队列
      */
@@ -54,8 +57,15 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
      */
     private final FSM fsm;
 
+    /**
+     * 线程关闭时回调
+     */
+    private final Consumer<Worker<T>> shutdownCall;
+
+
     public SimpleWorker(String name, int workerId, Semaphore semaphore, FSM fsm, Tuple2<Lock, Condition> startNotify,
-                        LinkedBlockingDeque<T> dataQueue, Consumer<T> workerConsumer, ExecutorProperties processProperties) {
+                        LinkedBlockingDeque<T> dataQueue, Consumer<T> workerConsumer, ExecutorProperties processProperties,
+                        Consumer<Worker<T>> shutdownCall, int wokerRole) {
         super(name);
         this.workerId = workerId;
         this.dataQueue = dataQueue;
@@ -64,6 +74,8 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
         this.workerConsumer = workerConsumer;
         this.processProperties = processProperties;
         this.startNotify = startNotify;
+        this.shutdownCall = shutdownCall;
+        this.curWokerRole = wokerRole;
     }
 
     /**
@@ -73,13 +85,26 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
     @Override
     public void run() {
         semaphore.release(); //释放信号量+1
+        long workerPullTimeout = processProperties.getWorkerPullTimeout(); // 拉取数据超时时间
+        long alivetime = this.curWokerRole == SimpleWorker.TEMPORARY_WORKER ? processProperties.getWorkerAlivetime() : -1;//存活时间
+        long restAliveTime = Long.MAX_VALUE;//线程剩余存活时间，只有当Worker非核心时，会计算剩余存活时间
+        long beginTime = System.nanoTime(); //起始时间,单位纳秒
         while (true) {
             try {
+                if (alivetime > 0) {//只有存活时间>0才做存活判断
+                    long curNanoTime = System.nanoTime();
+                    long duration = TimeUnit.NANOSECONDS.toMillis(curNanoTime - beginTime);
+                    restAliveTime = alivetime - duration; //最大存活时间-以经过时间=剩余存活时间
+                    if (duration >= alivetime) { //如果存活时间大于设置的存活时间，则结束当前线程
+                        break;
+                    }
+                }
                 if (fsm.event() == Event.RUN) { //运行
-                    T data = dataQueue.poll(processProperties.getWorkerPullTimeout(), TimeUnit.MILLISECONDS);
+                    //剩余存活时间>拉取超时时间，则使用拉取超时时间等待，否则使用剩余存活时间等待。更精准的时间控制
+                    T data = dataQueue.poll(Math.min(restAliveTime, workerPullTimeout), TimeUnit.MILLISECONDS);
                     if (data != null) {
+                        beginTime = System.nanoTime();//获取到了数据，则重置存活开始时间
                         semaphore.tryAcquire();//扣减信号量-1
-                        logger.info("Worker[{}]:{}", getName(), dataQueue.size());
                         this.workerConsumer.accept(data); //执行实际消费动作
                         semaphore.release(); //释放信号量+1
                     }
@@ -95,10 +120,10 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
                 } else if (fsm.event() == Event.STOP) { // 停止：消费完队列数据，然后等待Master启动信号
                     logger.info("Worker[{}] take stop signal.", getName());
                     fastConsume(); //快速消费，不阻塞，获取null直接结束
-                    this.awaitStart(); //等待启动
+                    this.awaitStart(restAliveTime); //等待启动
                 } else if (fsm.event() == Event.STOP_NOW) { //立马停止：停止消费，直接等待Master启动信号
                     logger.info("Worker[{}] take stop_now signal.", getName());
-                    this.awaitStart(); //等待启动
+                    this.awaitStart(restAliveTime); //等待启动
                 }
             } catch (InterruptedException e) {
                 logger.error("Worker[{}] Interrupted.", getName());
@@ -106,20 +131,22 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
             }
         }
         semaphore.tryAcquire();//扣减信号量-1
+        shutdownCall.accept(this); //线程关闭回调
         logger.info("Worker[{}] closed.", getName());
     }
 
     public void fastConsume() {
-        T data = null;
+        T data;
         while ((data = dataQueue.poll()) != null) {
             this.workerConsumer.accept(data);
         }
     }
 
-    public void awaitStart() throws InterruptedException {
+    public void awaitStart(long restAliveTime) throws InterruptedException {
         try {
             this.startNotify.t1.lock();
-            this.startNotify.t2.await(3, TimeUnit.SECONDS);//等待启动通知
+            //剩余存活时间与3秒取最小等待
+            this.startNotify.t2.await(Math.min(restAliveTime, 3000), TimeUnit.MILLISECONDS);//等待启动通知
         } finally {
             this.startNotify.t1.unlock();
         }
@@ -138,6 +165,9 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
         private Tuple2<Lock, Condition> startNotify;
         private Semaphore semaphore;
         private FSM fsm;
+        private int wokerRole = SimpleWorker.TEMPORARY_WORKER; //默认临时woker
+        private Consumer<Worker<T>> shutdownCall = (d) -> {
+        };
 
         public Builder<T> name(String name) {
             this.name = name;
@@ -174,14 +204,31 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
             return this;
         }
 
+        public Builder<T> shutdownCall(Consumer<Worker<T>> shutdownCall) {
+            this.shutdownCall = shutdownCall;
+            return this;
+        }
+
+        public Builder<T> wokerRole(int wokerRole) {
+            if (wokerRole != SimpleWorker.TEMPORARY_WORKER && wokerRole != SimpleWorker.CORE_WOKER) {
+                throw new ExecutorException("wokerRole Error.");
+            }
+            this.wokerRole = wokerRole;
+            return this;
+        }
+
+
         public Builder<T> fsm(FSM fsm) {
             this.fsm = fsm;
             return this;
         }
 
         public SimpleWorker<T> build() {
-            return new SimpleWorker<>(this.name, this.workerId, this.semaphore,
-                    this.fsm, this.startNotify, this.dataQueue, this.workerConsumer, this.processProperties);
+            SimpleWorker<T> worker = new SimpleWorker<>(this.name, this.workerId, this.semaphore,
+                    this.fsm, this.startNotify, this.dataQueue, this.workerConsumer, this.processProperties,
+                    this.shutdownCall, this.wokerRole);
+            worker.setDaemon(true);
+            return worker;
         }
 
     }

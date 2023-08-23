@@ -54,16 +54,20 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
         ReentrantLock lock = new ReentrantLock();
         startNotify = new Tuple2<>(lock, lock.newCondition());
         //注册当前执行器到全局
-        GlobalExecutorRegistry.registe(this, new ExecutorContext(name, this.dataQueue, workers, fsm, processProperties));
+        GlobalExecutorRegistry.register(this, new ExecutorContext(name, this.dataQueue, workers, fsm, processProperties));
     }
 
     /**
      * 创建Worker
      */
     @Override
-    protected Worker<T> doCreateWorker() {
-        int workerId = getWorkerId();
-        String workerName = String.format("Worker-%s-%d", name, workerId);
+    protected synchronized Worker<T> doCreateWorker() {
+        int wokerRole = SimpleWorker.TEMPORARY_WORKER; //临时woker
+        if (this.workers.size() < processProperties.getCoreWorkerSize()) {
+            wokerRole = SimpleWorker.CORE_WOKER; //核心woker
+        }
+        int workerId = getWorkerId(); //获取workerId
+        String workerName = String.format("Worker-%s-%d", name, workerId); //生成workerName
         logger.info("Create Worker[{}] .", workerName);
         return new SimpleWorker.Builder<T>()
                 .name(workerName)
@@ -72,8 +76,10 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
                 .semaphore(semaphore)
                 .startNotify(startNotify)
                 .dataQueue(dataQueue)
+                .wokerRole(wokerRole)
                 .workerConsumer(workerConsumer)
                 .processProperties(processProperties)
+                .shutdownCall(this::removeWorker) //Woker关闭回调，从woker列表中移除当前worker
                 .build();
     }
 
@@ -83,7 +89,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
     @Override
     protected void removeWorker(Worker<?> worker) {
         SimpleWorker<?> simpleWorker = (SimpleWorker<?>) worker;
-        releaseWorkerId(simpleWorker.getWorkerId());//释放workerId，在后续新创建worker时可以复用
+        releaseWorkerId(simpleWorker.getWorkerId());//释放归还workerId，在后续新创建worker时可以复用
         super.removeWorker(worker);
     }
 
@@ -102,7 +108,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
             }
             this.fsm.start(() -> { //启动
                 if (masterTh == null) { //如果Master线程为空，则表明第一次启动，需要创建Master线程
-                    masterTh = new Thread(this::masterExecute);
+                    masterTh = new Thread(this::masterExecute, String.format("Master-%s", name));
                     masterTh.setDaemon(true);
                     masterTh.start(); //启动主线程
                 }
