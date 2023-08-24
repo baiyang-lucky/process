@@ -60,6 +60,11 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
      */
     private final Consumer<Worker<T>> shutdownCall;
 
+    /**
+     * 该woker关闭标志，用于控制单个woker关闭
+     */
+    private volatile boolean closeFlag = false;
+
 
     public SimpleWorker(String name, int workerId, Semaphore semaphore, FSM fsm, Tuple2<Lock, Condition> startNotify,
                         BlockingQueue<T> dataQueue, Consumer<T> workerConsumer, ExecutorProperties processProperties,
@@ -123,8 +128,11 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
                     logger.info("Worker[{}] take stop_now signal.", getName());
                     this.awaitStart(restAliveTime); //等待启动
                 }
+                if (closeFlag) {
+                    break;
+                }
             } catch (InterruptedException e) {
-                logger.error("Worker[{}] Interrupted.", getName());
+                logger.info("Worker[{}] Interrupted.", getName());
                 break;
             }
         }
@@ -133,10 +141,21 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
         logger.info("Worker[{}] closed.", getName());
     }
 
+    /**
+     * 关闭当前worker
+     */
+    public void close() {
+        this.closeFlag = true; //关闭标志
+        this.interrupt(); // 中断等待
+    }
+
     public void fastConsume() {
         T data;
         while ((data = dataQueue.poll()) != null) {
             this.workerConsumer.accept(data);
+            if (closeFlag) {
+                break;
+            }
         }
     }
 

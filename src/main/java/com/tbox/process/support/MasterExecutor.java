@@ -2,6 +2,7 @@ package com.tbox.process.support;
 
 import com.tbox.process.MasterPuller;
 import com.tbox.process.Worker;
+import com.tbox.process.WorkerCreateClose;
 import com.tbox.process.exception.ExecutorException;
 import com.tbox.process.type.Event;
 import com.tbox.process.type.LimitVelocityStrategy;
@@ -24,10 +25,12 @@ import java.util.function.Consumer;
  * @author 白杨
  * DateTime:2023/8/22 10:43
  */
-public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
-    private static final Logger logger = LoggerFactory.getLogger(MsterExecutor.class);
-    private static final int BYTE_BIT_SIZE = 8;
-    private volatile byte[] workerIdPoll = new byte[32]; // 最多256个workerId
+public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
+    private static final Logger logger = LoggerFactory.getLogger(MasterExecutor.class);
+    /**
+     * workerId池
+     */
+    private final WorkerIdPool workerIdPool = new WorkerIdPool();
     /**
      * worker信号量
      */
@@ -49,14 +52,18 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
      */
     protected final Tuple2<Lock, Condition> startNotify;
 
-    private final Object workerIdLock = new Object();
+    /**
+     * Woker创建与关闭判决
+     */
+    private final WorkerCreateClose workerCreateClose;
 
-    public MsterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
+    public MasterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer, WorkerCreateClose workerCreateClose) {
         super(name, processProperties, dataQueue, masterPuller, workerConsumer);
         this.semaphore = new Semaphore(0);
         this.fsm = new FSM(name);
         ReentrantLock lock = new ReentrantLock();
         startNotify = new Tuple2<>(lock, lock.newCondition());
+        this.workerCreateClose = workerCreateClose;
         //注册当前执行器到全局
         GlobalExecutorRegistry.register(this, new ExecutorContext(name, this.dataQueue, workers, fsm, processProperties));
     }
@@ -65,12 +72,12 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
      * 创建Worker
      */
     @Override
-    protected synchronized Worker<T> doCreateWorker() {
+    protected Worker<T> doCreateWorker() {
         int wokerRole = SimpleWorker.TEMPORARY_WORKER; //临时woker
         if (this.workers.size() < processProperties.getCoreWorkerSize()) {
             wokerRole = SimpleWorker.CORE_WOKER; //核心woker
         }
-        int workerId = getWorkerId(); //获取workerId
+        int workerId = workerIdPool.getWorkerId(); //获取workerId
         String workerName = String.format("Worker-%s-%d", name, workerId); //生成workerName
         logger.info("Create Worker[{}].", workerName);
         return new SimpleWorker.Builder<T>()
@@ -94,7 +101,7 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
     protected void removeWorker(Worker<?> worker) {
         super.removeWorker(worker);
         SimpleWorker<?> simpleWorker = (SimpleWorker<?>) worker;
-        releaseWorkerId(simpleWorker.getWorkerId());//释放归还workerId，在后续新创建worker时可以复用
+        workerIdPool.releaseWorkerId(simpleWorker.getWorkerId());//释放归还workerId，在后续新创建worker时可以复用
     }
 
     /**
@@ -176,9 +183,35 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
      */
     @Override
     protected void putQueueBefore(T data) {
-        // 如果核心worker处于繁忙，并且当期worker数小于最大数,则创建新worker
-        if (!semaphore.tryAcquire() && workers.size() < processProperties.getMaxWorkerSize()) {
-            createWorker().start(); // 创建worker并启动
+        int workerCount = workers.size();
+        if (workerCreateClose != null) {
+            int overstockCount = dataQueue.size();
+            int queueLenght = processProperties.getQueueSize();
+            int idleWorkerCount = semaphore.drainPermits();
+            boolean create = false;
+            boolean close = false;
+            if (workerCount < processProperties.getMaxWorkerSize()) {
+                create = workerCreateClose.determinCreateWorker(overstockCount, queueLenght, workerCount, idleWorkerCount);
+            }
+            if (workerCount > processProperties.getCoreWorkerSize()) {
+                close = workerCreateClose.determineCloseWorker(overstockCount, queueLenght, workerCount, idleWorkerCount);
+            }
+            if (create != close) { //当不相等时才生效
+                if (create) {
+                    createWorker().start(); // 创建worker并启动
+                } else {
+                    //关闭一个临时worker
+                    workers.stream()
+                            .filter(worker -> ((SimpleWorker<?>) worker).curWokerRole == SimpleWorker.TEMPORARY_WORKER)
+                            .findFirst()
+                            .ifPresent(luckyDog -> ((SimpleWorker<?>) luckyDog).close());
+                }
+            }
+        } else {
+            // 如果核心worker处于繁忙，并且当期worker数小于最大数,则创建新worker
+            if (!semaphore.tryAcquire() && workerCount < processProperties.getMaxWorkerSize()) {
+                createWorker().start(); // 创建worker并启动
+            }
         }
     }
 
@@ -253,46 +286,12 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
         return state;
     }
 
-    /**
-     * 获取workerId
-     */
-    protected synchronized int getWorkerId() {
-        int workerId = 0;
-        synchronized (workerIdLock) {
-            for (int j = 0; j < workerIdPoll.length; j++) {
-                byte b = workerIdPoll[j];
-                int i = 0;
-                while ((((((int) b) & 0xff) >>> i) & 1) != 0) {
-                    i++;
-                    workerId++;
-                }
-                if (i != BYTE_BIT_SIZE) {
-                    workerIdPoll[j] |= 1 << j;
-                    break;
-                }
-            }
-        }
-        if (workerId >= workerIdPoll.length * BYTE_BIT_SIZE) {
-            throw new ExecutorException("workerId poll full.");
-        }
-        return workerId + 1;
-    }
-
-    /**
-     * 释放归还workerId
-     */
-    private synchronized void releaseWorkerId(int workerId) {
-        synchronized (workerIdLock) {
-            workerIdPoll[((workerId + BYTE_BIT_SIZE - 1) / BYTE_BIT_SIZE) - 1] &= (~(1 << ((workerId - 1) % BYTE_BIT_SIZE))) & 0xff;
-        }
-    }
-
-
     public static class Builder<T> {
         private String name;
         private ExecutorProperties executorProperties;
         private MasterPuller<T> masterPuller;
         private Consumer<T> workerConsumer;
+        private WorkerCreateClose workerCreateClose;
 
         public Builder<T> name(String name) {
             this.name = name;
@@ -314,8 +313,13 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
             return this;
         }
 
+        public Builder<T> workerCreateClose(WorkerCreateClose workerCreateClose) {
+            this.workerCreateClose = workerCreateClose;
+            return this;
+        }
 
-        public MsterExecutor<T> build() {
+
+        public MasterExecutor<T> build() {
             if (executorProperties == null) {
                 executorProperties = new ExecutorProperties();
             }
@@ -333,7 +337,7 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
                 //不限速则意味着允许出现数据堆积，使用LinkedBlockingQueue
                 dataQueue = new LinkedBlockingQueue<>(executorProperties.getQueueSize());
             }
-            return new MsterExecutor<T>(name, executorProperties, dataQueue, masterPuller, workerConsumer);
+            return new MasterExecutor<T>(name, executorProperties, dataQueue, masterPuller, workerConsumer, workerCreateClose);
         }
 
     }
