@@ -1,6 +1,6 @@
 package com.tbox.process;
 
-import com.tbox.process.support.ControllableMsterExecutor;
+import com.tbox.process.support.MsterExecutor;
 import com.tbox.process.support.ExecutorProperties;
 
 import java.util.ArrayList;
@@ -9,7 +9,7 @@ import java.util.Random;
 public class ProcessTest {
     public static void main(String[] args) throws InterruptedException {
 
-        ControllableMsterExecutor<String> printTask = new ControllableMsterExecutor.Builder<String>()
+        MsterExecutor<String> printTask = new MsterExecutor.Builder<String>()
                 .name("print_task")
                 .executorProperties(ExecutorProperties.builder()
                         .queueSize(1024) //队列长度

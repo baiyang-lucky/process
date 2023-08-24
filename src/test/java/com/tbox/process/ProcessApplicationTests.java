@@ -2,52 +2,40 @@ package com.tbox.process;
 
 import com.tbox.process.type.Event;
 
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
 
 class ProcessApplicationTests {
-    public static void test(Event state){
+    public static void test(Event state) {
         state = Event.RUN;
     }
+
     public static void main(String[] args) throws InterruptedException {
-//        EventState state = EventState.STOP;
-//        test(state);
-//        System.out.println(state);
-//        ReentrantLock lock = new ReentrantLock();
-//        Condition runNotify = lock.newCondition();
-//        Condition stopNotify = lock.newCondition();
-//
-//        Thread thread = new Thread(() -> {
-//            try {
-//                Thread.sleep(1);
-//                lock.lock();
-//                System.out.println("等待停止");
-//                stopNotify.await();
-//                System.out.println("获得通知");
-//                lock.lock();
-//                runNotify.signalAll();
-//                lock.unlock();
-//                System.out.println("通知运行");
-//            } catch (InterruptedException e) {
-//                throw new RuntimeException(e);
-//            } finally {
-//
+//        Thread t = new Thread(() -> {
+//            while (true) {
+//                try {
+//                    System.out.println("执行");
+//                    Thread.sleep(5000);
+//                } catch (InterruptedException e) {
+//                    continue;
+//                }
 //            }
+////            System.out.println("中断结束");
 //        });
-//        thread.start();
-//
+//        t.start();
 //        Thread.sleep(1000);
-//        try {
-//            lock.lock();
-//            stopNotify.signalAll();
-//            System.out.println("await");
-//            runNotify.await();
-//        } finally {
-//            System.out.println("awaitEnd");
-//        }
-        LinkedBlockingDeque q = new LinkedBlockingDeque();
-        q.offer(1);
-        System.out.println(q.poll());
-        System.out.println(q.poll());
+//        while (true)
+//            t.interrupt();
+//        System.out.println("触发中断");
+        long l = Long.MAX_VALUE;
+//        System.out.println();
+//        Thread.sleep(1000);
+        System.out.println(TimeUnit.MILLISECONDS.toSeconds(l));
+
+
     }
 
     static int workerIdFlag = 0;

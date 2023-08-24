@@ -4,13 +4,13 @@ import com.tbox.process.MasterPuller;
 import com.tbox.process.Worker;
 import com.tbox.process.exception.ExecutorException;
 import com.tbox.process.type.Event;
+import com.tbox.process.type.LimitVelocityStrategy;
 import com.tbox.process.type.State;
 import com.tbox.process.type.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -23,32 +23,32 @@ import java.util.function.Consumer;
  * @author 白杨
  * DateTime:2023/8/22 10:43
  */
-public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
-    private static final Logger logger = LoggerFactory.getLogger(ControllableMsterExecutor.class);
+public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
+    private static final Logger logger = LoggerFactory.getLogger(MsterExecutor.class);
     private volatile int workerIdFlag = 0;
     /**
      * worker信号量
      */
-    private final Semaphore semaphore;
+    protected final Semaphore semaphore;
     /**
      * 当前状态
      */
-    private final State state = State.INIT;
+    protected final State state = State.INIT;
     /**
      * 状态机
      */
-    private final FSM fsm;
+    protected final FSM fsm;
     /**
      * Master线程
      */
-    private Thread masterTh;
+    protected Thread masterTh;
     /**
      * 多线程等待通知
      */
-    private final Tuple2<Lock, Condition> startNotify;
+    protected final Tuple2<Lock, Condition> startNotify;
 
-    public ControllableMsterExecutor(String name, ExecutorProperties processProperties, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
-        super(name, processProperties, masterPuller, workerConsumer);
+    public MsterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
+        super(name, processProperties, dataQueue, masterPuller, workerConsumer);
         this.semaphore = new Semaphore(0);
         this.fsm = new FSM(name);
         ReentrantLock lock = new ReentrantLock();
@@ -251,7 +251,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
     /**
      * 获取workerId
      */
-    private synchronized int getWorkerId() {
+    protected synchronized int getWorkerId() {
         int i = 0;
         while (((workerIdFlag >> i) & 1) != 0) {
             i++;
@@ -295,7 +295,7 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
         }
 
 
-        public ControllableMsterExecutor<T> build() {
+        public MsterExecutor<T> build() {
             if (executorProperties == null) {
                 executorProperties = new ExecutorProperties();
             }
@@ -305,7 +305,15 @@ public class ControllableMsterExecutor<T> extends AbstrctMasterExecutor<T> {
             if (workerConsumer == null) {
                 throw new ExecutorException("workerConsumer is require.");
             }
-            return new ControllableMsterExecutor<T>(name, executorProperties, masterPuller, workerConsumer);
+            BlockingQueue<T> dataQueue;
+            if (executorProperties.getLimitVelocityStrategy() == LimitVelocityStrategy.BALANCE) {
+                //速度平衡使用同步队列
+                dataQueue = new SynchronousQueue<>();
+            } else {
+                //不限速则意味着允许出现数据堆积，使用LinkedBlockingQueue
+                dataQueue = new LinkedBlockingQueue<>(executorProperties.getQueueSize());
+            }
+            return new MsterExecutor<T>(name, executorProperties, dataQueue, masterPuller, workerConsumer);
         }
 
     }

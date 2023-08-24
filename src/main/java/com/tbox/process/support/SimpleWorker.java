@@ -7,9 +7,7 @@ import com.tbox.process.type.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
@@ -30,7 +28,7 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
     /**
      * 数据队列
      */
-    private final LinkedBlockingDeque<T> dataQueue;
+    private final BlockingQueue<T> dataQueue;
     /**
      * 消费动作，实际处理方法
      */
@@ -64,7 +62,7 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
 
 
     public SimpleWorker(String name, int workerId, Semaphore semaphore, FSM fsm, Tuple2<Lock, Condition> startNotify,
-                        LinkedBlockingDeque<T> dataQueue, Consumer<T> workerConsumer, ExecutorProperties processProperties,
+                        BlockingQueue<T> dataQueue, Consumer<T> workerConsumer, ExecutorProperties processProperties,
                         Consumer<Worker<T>> shutdownCall, int wokerRole) {
         super(name);
         this.workerId = workerId;
@@ -157,16 +155,16 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
     }
 
     public static class Builder<T> {
-        private String name;
-        private LinkedBlockingDeque<T> dataQueue;
-        private Consumer<T> workerConsumer;
-        private int workerId;
-        private ExecutorProperties processProperties;
-        private Tuple2<Lock, Condition> startNotify;
-        private Semaphore semaphore;
-        private FSM fsm;
-        private int wokerRole = SimpleWorker.TEMPORARY_WORKER; //默认临时woker
-        private Consumer<Worker<T>> shutdownCall = (d) -> {
+        protected String name;
+        protected BlockingQueue<T> dataQueue;
+        protected Consumer<T> workerConsumer;
+        protected int workerId;
+        protected ExecutorProperties processProperties;
+        protected Tuple2<Lock, Condition> startNotify;
+        protected Semaphore semaphore;
+        protected FSM fsm;
+        protected int wokerRole = SimpleWorker.TEMPORARY_WORKER; //默认临时woker
+        protected Consumer<Worker<T>> shutdownCall = (d) -> {
         };
 
         public Builder<T> name(String name) {
@@ -174,7 +172,7 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
             return this;
         }
 
-        public Builder<T> dataQueue(LinkedBlockingDeque<T> dataQueue) {
+        public Builder<T> dataQueue(BlockingQueue<T> dataQueue) {
             this.dataQueue = dataQueue;
             return this;
         }

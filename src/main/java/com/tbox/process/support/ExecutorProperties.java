@@ -1,5 +1,7 @@
 package com.tbox.process.support;
 
+import com.tbox.process.type.LimitVelocityStrategy;
+
 /**
  * 执行器属性配置
  *
@@ -37,6 +39,11 @@ public class ExecutorProperties {
      * 单位：毫秒
      */
     private long workerAlivetime = 20 * 1000;
+
+    /**
+     * 限速策略；默认平衡策略
+     */
+    private LimitVelocityStrategy limitVelocityStrategy = LimitVelocityStrategy.BALANCE;
 
 
     public int getQueueSize() {
@@ -87,6 +94,14 @@ public class ExecutorProperties {
         this.workerAlivetime = workerAlivetime;
     }
 
+    public LimitVelocityStrategy getLimitVelocityStrategy() {
+        return limitVelocityStrategy;
+    }
+
+    public void setLimitVelocityStrategy(LimitVelocityStrategy limitVelocityStrategy) {
+        this.limitVelocityStrategy = limitVelocityStrategy;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -121,6 +136,11 @@ public class ExecutorProperties {
 
         public Builder workerAlivetime(long workerAlivetime) {
             processProperties.setWorkerAlivetime(workerAlivetime);
+            return this;
+        }
+
+        public Builder limitVelocityStrategy(LimitVelocityStrategy limitVelocityStrategy) {
+            processProperties.setLimitVelocityStrategy(limitVelocityStrategy);
             return this;
         }
 

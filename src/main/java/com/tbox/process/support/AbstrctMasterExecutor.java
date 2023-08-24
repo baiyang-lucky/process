@@ -6,7 +6,7 @@ import com.tbox.process.Worker;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.BlockingQueue;
 import java.util.function.Consumer;
 
 /**
@@ -31,7 +31,7 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
     /**
      * Master与Worker之间数据传输队列
      */
-    protected final LinkedBlockingDeque<T> dataQueue;
+    protected final BlockingQueue<T> dataQueue;
 
     /**
      * 当前Master下Worker集合
@@ -48,10 +48,10 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
      */
     protected Consumer<T> workerConsumer;
 
-    public AbstrctMasterExecutor(String name, ExecutorProperties processProperties, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
+    public AbstrctMasterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
         this.name = name;
         this.processProperties = processProperties;
-        this.dataQueue = new LinkedBlockingDeque<>(processProperties.getQueueSize());
+        this.dataQueue = dataQueue;
         this.workers = new ArrayList<>(processProperties.getMaxWorkerSize());
         this.masterPuller = masterPuller;
         this.workerConsumer = workerConsumer;
