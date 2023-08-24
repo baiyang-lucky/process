@@ -10,6 +10,7 @@ import com.tbox.process.type.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -25,7 +26,8 @@ import java.util.function.Consumer;
  */
 public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
     private static final Logger logger = LoggerFactory.getLogger(MsterExecutor.class);
-    private volatile int workerIdFlag = 0;
+    private static final int BYTE_BIT_SIZE = 8;
+    private volatile byte[] workerIdPoll = new byte[32]; // 最多256个workerId
     /**
      * worker信号量
      */
@@ -46,6 +48,8 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
      * 多线程等待通知
      */
     protected final Tuple2<Lock, Condition> startNotify;
+
+    private final Object workerIdLock = new Object();
 
     public MsterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
         super(name, processProperties, dataQueue, masterPuller, workerConsumer);
@@ -68,7 +72,7 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
         }
         int workerId = getWorkerId(); //获取workerId
         String workerName = String.format("Worker-%s-%d", name, workerId); //生成workerName
-        logger.info("Create Worker[{}] .", workerName);
+        logger.info("Create Worker[{}].", workerName);
         return new SimpleWorker.Builder<T>()
                 .name(workerName)
                 .workerId(workerId)
@@ -88,9 +92,9 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
      */
     @Override
     protected void removeWorker(Worker<?> worker) {
+        super.removeWorker(worker);
         SimpleWorker<?> simpleWorker = (SimpleWorker<?>) worker;
         releaseWorkerId(simpleWorker.getWorkerId());//释放归还workerId，在后续新创建worker时可以复用
-        super.removeWorker(worker);
     }
 
     /**
@@ -130,7 +134,7 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
             if (fsm.event() == Event.RUN) {
                 executeOnece((restDatas) -> {
                     //full back 处理
-                    logger.debug("队列满，剩余未处理：" + restDatas.size());
+//                    logger.debug("队列满，剩余未处理：" + restDatas.size());
                     for (T restData : restDatas) {
                         if (state == State.SHUTDOWN) {
                             logger.info("Take shutdown signal，stop full back process.");
@@ -145,7 +149,7 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
                             throw new ExecutorException(String.format("Master[%s] fullback trigger InterruptedException", name));
                         }
                     }
-                    logger.debug("full back结束：" + restDatas);
+//                    logger.debug("full back结束：" + restDatas);
                 });
             } else if (fsm.event() == Event.SHUTDOWN_NOW || fsm.event() == Event.SHUTDOWN) { //关闭
                 logger.info("Master[{}] take shutdown signal.", name);
@@ -230,7 +234,8 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
                 masterTh = null;
             }
             // 等待Worker结束
-            for (Worker<?> worker : workers) {
+            ArrayList<Worker<?>> copyWorkers = new ArrayList<>(workers);
+            for (Worker<?> worker : copyWorkers) {
                 SimpleWorker<?> simpleWorker = (SimpleWorker<?>) worker;
                 if (simpleWorker.isAlive()) {
                     simpleWorker.join();
@@ -252,19 +257,34 @@ public class MsterExecutor<T> extends AbstrctMasterExecutor<T> {
      * 获取workerId
      */
     protected synchronized int getWorkerId() {
-        int i = 0;
-        while (((workerIdFlag >> i) & 1) != 0) {
-            i++;
+        int workerId = 0;
+        synchronized (workerIdLock) {
+            for (int j = 0; j < workerIdPoll.length; j++) {
+                byte b = workerIdPoll[j];
+                int i = 0;
+                while ((((((int) b) & 0xff) >>> i) & 1) != 0) {
+                    i++;
+                    workerId++;
+                }
+                if (i != BYTE_BIT_SIZE) {
+                    workerIdPoll[j] |= 1 << j;
+                    break;
+                }
+            }
         }
-        workerIdFlag |= 1 << i;
-        return i + 1;
+        if (workerId >= workerIdPoll.length * BYTE_BIT_SIZE) {
+            throw new ExecutorException("workerId poll full.");
+        }
+        return workerId + 1;
     }
 
     /**
      * 释放归还workerId
      */
     private synchronized void releaseWorkerId(int workerId) {
-        workerIdFlag &= ~(1 << (workerId - 1));
+        synchronized (workerIdLock) {
+            workerIdPoll[((workerId + BYTE_BIT_SIZE - 1) / BYTE_BIT_SIZE) - 1] &= (~(1 << ((workerId - 1) % BYTE_BIT_SIZE))) & 0xff;
+        }
     }
 
 

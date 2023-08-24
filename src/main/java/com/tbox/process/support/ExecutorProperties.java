@@ -1,5 +1,6 @@
 package com.tbox.process.support;
 
+import com.tbox.process.exception.ExecutorException;
 import com.tbox.process.type.LimitVelocityStrategy;
 
 /**
@@ -119,8 +120,11 @@ public class ExecutorProperties {
             return this;
         }
 
-        public Builder maxWorkderSize(int maxWorkderSize) {
-            processProperties.setMaxWorkerSize(maxWorkderSize);
+        public Builder maxWorkerSize(int maxWorkerSize) {
+            if (maxWorkerSize > 256) {
+                throw new ExecutorException("maxWorkerSize max 256");
+            }
+            processProperties.setMaxWorkerSize(maxWorkerSize);
             return this;
         }
 

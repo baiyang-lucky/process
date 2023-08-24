@@ -7,8 +7,6 @@ import com.tbox.process.support.GlobalExecutorRegistryAgent;
 import com.tbox.process.type.LimitVelocityStrategy;
 
 import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -43,7 +41,7 @@ public class MonitorTest {
                     .queueSize(2048)
 //                    .coreWorkerSize(1 + i / 2)
                     .coreWorkerSize(1)
-                    .maxWorkderSize(5)
+                    .maxWorkerSize(5)
                     .build(), countDownLatch));
         }
         long s = System.nanoTime();

@@ -14,7 +14,7 @@ public class ProcessTest {
                 .executorProperties(ExecutorProperties.builder()
                         .queueSize(1024) //队列长度
                         .coreWorkerSize(1) //核心worker数
-                        .maxWorkderSize(5) //最大worker数
+                        .maxWorkerSize(5) //最大worker数
                         .workerAlivetime(20 * 1000) // woker空闲存活时间
                         .build())
                 .masterPuller(() -> { //Mster数据拉取

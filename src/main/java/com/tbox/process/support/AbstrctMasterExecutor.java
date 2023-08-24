@@ -5,6 +5,7 @@ import com.tbox.process.MasterPuller;
 import com.tbox.process.Worker;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.function.Consumer;
@@ -52,7 +53,7 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
         this.name = name;
         this.processProperties = processProperties;
         this.dataQueue = dataQueue;
-        this.workers = new ArrayList<>(processProperties.getMaxWorkerSize());
+        this.workers = Collections.synchronizedList(new ArrayList<>(processProperties.getMaxWorkerSize()));
         this.masterPuller = masterPuller;
         this.workerConsumer = workerConsumer;
     }
