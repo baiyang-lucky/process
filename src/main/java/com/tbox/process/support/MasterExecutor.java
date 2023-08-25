@@ -4,6 +4,7 @@ import com.tbox.process.MasterPuller;
 import com.tbox.process.Worker;
 import com.tbox.process.WorkerCreateClose;
 import com.tbox.process.exception.ExecutorException;
+import com.tbox.process.support.workercc.BusyRateWorkerCreateClose;
 import com.tbox.process.type.Event;
 import com.tbox.process.type.LimitVelocityStrategy;
 import com.tbox.process.type.State;
@@ -12,6 +13,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -25,8 +29,9 @@ import java.util.function.Consumer;
  * @author 白杨
  * DateTime:2023/8/22 10:43
  */
-public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
+public class MasterExecutor<T> extends AbstractMasterExecutor<T> {
     private static final Logger logger = LoggerFactory.getLogger(MasterExecutor.class);
+
     /**
      * workerId池
      */
@@ -55,7 +60,12 @@ public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
     /**
      * Woker创建与关闭判决
      */
-    private final WorkerCreateClose workerCreateClose;
+    private WorkerCreateClose workerCreateClose;
+
+    /**
+     * 用于存放临时Worker
+     */
+    private final List<SimpleWorker<T>> tempWorkers = Collections.synchronizedList(new ArrayList<>());
 
     public MasterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer, WorkerCreateClose workerCreateClose) {
         super(name, processProperties, dataQueue, masterPuller, workerConsumer);
@@ -64,6 +74,9 @@ public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
         ReentrantLock lock = new ReentrantLock();
         startNotify = new Tuple2<>(lock, lock.newCondition());
         this.workerCreateClose = workerCreateClose;
+        if (this.workerCreateClose == null) {
+            this.workerCreateClose = new BusyRateWorkerCreateClose();
+        }
         //注册当前执行器到全局
         GlobalExecutorRegistry.register(this, new ExecutorContext(name, this.dataQueue, workers, fsm, processProperties));
     }
@@ -73,25 +86,29 @@ public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
      */
     @Override
     protected Worker<T> doCreateWorker() {
-        int wokerRole = SimpleWorker.TEMPORARY_WORKER; //临时woker
+        int workerRole = SimpleWorker.TEMPORARY_WORKER; //临时wroker
         if (this.workers.size() < processProperties.getCoreWorkerSize()) {
-            wokerRole = SimpleWorker.CORE_WOKER; //核心woker
+            workerRole = SimpleWorker.CORE_WOKER; //核心worker
         }
         int workerId = workerIdPool.getWorkerId(); //获取workerId
         String workerName = String.format("Worker-%s-%d", name, workerId); //生成workerName
         logger.info("Create Worker[{}].", workerName);
-        return new SimpleWorker.Builder<T>()
+        SimpleWorker<T> worker = new SimpleWorker.Builder<T>()
                 .name(workerName)
                 .workerId(workerId)
                 .fsm(fsm)
                 .semaphore(semaphore)
                 .startNotify(startNotify)
                 .dataQueue(dataQueue)
-                .wokerRole(wokerRole)
+                .wokerRole(workerRole)
                 .workerConsumer(workerConsumer)
                 .processProperties(processProperties)
-                .shutdownCall(this::removeWorker) //Woker关闭回调，从woker列表中移除当前worker
+                .shutdownCall(this::removeWorker) //Worker关闭回调，从wroker列表中移除当前worker
                 .build();
+        if (workerRole == SimpleWorker.TEMPORARY_WORKER) {
+            tempWorkers.add(worker); //如果是临时，则加入到临时Worker列表
+        }
+        return worker;
     }
 
     /**
@@ -101,6 +118,9 @@ public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
     protected void removeWorker(Worker<?> worker) {
         super.removeWorker(worker);
         SimpleWorker<?> simpleWorker = (SimpleWorker<?>) worker;
+        if (simpleWorker.curWorkerRole == SimpleWorker.TEMPORARY_WORKER) { //如果是临时worker则从临时worker列表移除
+            tempWorkers.remove(simpleWorker); //如果是临时，则加入到临时Worker列表
+        }
         workerIdPool.releaseWorkerId(simpleWorker.getWorkerId());//释放归还workerId，在后续新创建worker时可以复用
     }
 
@@ -139,7 +159,7 @@ public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
     private void masterExecute() {
         while (true) {
             if (fsm.event() == Event.RUN) {
-                executeOnece((restDatas) -> {
+                executeOnce((restDatas) -> {
                     //full back 处理
 //                    logger.debug("队列满，剩余未处理：" + restDatas.size());
                     for (T restData : restDatas) {
@@ -183,36 +203,47 @@ public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
      */
     @Override
     protected void putQueueBefore(T data) {
+        determineWorkerLife();
+    }
+
+    /**
+     * 存放最近创建关闭时间
+     */
+    private long determineCreateCloseTime = TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+
+    /**
+     * 通过workerCreateClose来判决是否需要创建新worker还是关闭一个临时worker。
+     */
+    private void determineWorkerLife() {
+        if (workerCreateClose == null) {
+            return;
+        }
+        if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime()) - determineCreateCloseTime < workerCreateClose.determineInterval()) { //时间间隔判断
+            return;
+        }
         int workerCount = workers.size();
-        if (workerCreateClose != null) {
-            int overstockCount = dataQueue.size();
-            int queueLenght = processProperties.getQueueSize();
-            int idleWorkerCount = semaphore.drainPermits();
-            boolean create = false;
-            boolean close = false;
-            if (workerCount < processProperties.getMaxWorkerSize()) {
-                create = workerCreateClose.determinCreateWorker(overstockCount, queueLenght, workerCount, idleWorkerCount);
-            }
-            if (workerCount > processProperties.getCoreWorkerSize()) {
-                close = workerCreateClose.determineCloseWorker(overstockCount, queueLenght, workerCount, idleWorkerCount);
-            }
-            if (create != close) { //当不相等时才生效
-                if (create) {
-                    createWorker().start(); // 创建worker并启动
-                } else {
-                    //关闭一个临时worker
-                    workers.stream()
-                            .filter(worker -> ((SimpleWorker<?>) worker).curWokerRole == SimpleWorker.TEMPORARY_WORKER)
-                            .findFirst()
-                            .ifPresent(luckyDog -> ((SimpleWorker<?>) luckyDog).close());
+        int accumulationCount = dataQueue.size();
+        int queueLenght = processProperties.getQueueSize();
+        int idleWorkerCount = semaphore.drainPermits();
+        boolean create = false;
+        boolean close = false;
+        if (workerCount < processProperties.getMaxWorkerSize()) {
+            create = workerCreateClose.determineCreateWorker(accumulationCount, queueLenght, workerCount, idleWorkerCount);
+        }
+        if (workerCount > processProperties.getCoreWorkerSize()) {
+            close = workerCreateClose.determineCloseWorker(accumulationCount, queueLenght, workerCount, idleWorkerCount);
+        }
+        if (create != close) { //当不相等时才生效
+            if (create) {
+                createWorker().start(); // 创建worker并启动
+            } else {
+                Iterator<SimpleWorker<T>> iterator = tempWorkers.iterator();
+                if (iterator.hasNext()) {
+                    iterator.next().close(); //关闭临时worker
                 }
             }
-        } else {
-            // 如果核心worker处于繁忙，并且当期worker数小于最大数,则创建新worker
-            if (!semaphore.tryAcquire() && workerCount < processProperties.getMaxWorkerSize()) {
-                createWorker().start(); // 创建worker并启动
-            }
         }
+        determineCreateCloseTime = TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
     }
 
     /**
@@ -286,12 +317,13 @@ public class MasterExecutor<T> extends AbstrctMasterExecutor<T> {
         return state;
     }
 
+
     public static class Builder<T> {
         private String name;
         private ExecutorProperties executorProperties;
         private MasterPuller<T> masterPuller;
         private Consumer<T> workerConsumer;
-        private WorkerCreateClose workerCreateClose;
+        private WorkerCreateClose workerCreateClose = new BusyRateWorkerCreateClose();
 
         public Builder<T> name(String name) {
             this.name = name;

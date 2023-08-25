@@ -8,6 +8,11 @@ package com.tbox.process;
 public interface WorkerCreateClose {
 
     /**
+     * 判决间隔时间，单位毫秒
+     */
+    long determineInterval();
+
+    /**
      * 判断是否需要创建一个worker
      *
      * @param overstockCount  数据积压数量
@@ -16,7 +21,7 @@ public interface WorkerCreateClose {
      * @param idleWorkerCount 当前空闲Woker数量
      * @return true-需要创建worker ； false-不需要创建worker；
      */
-    boolean determinCreateWorker(long overstockCount, long dataQueueLength, int workerCount, int idleWorkerCount);
+    boolean determineCreateWorker(long overstockCount, long dataQueueLength, int workerCount, int idleWorkerCount);
 
     /**
      * 判决是否需要关闭一个worker

@@ -14,12 +14,12 @@ import java.util.function.Consumer;
  * Master处理基础抽象
  * 维护了一个dataQueue用于Master与Worker之间的数据传输，以及属性配置。
  * 维护了Worker的创建与worker队列，具体Worker的创建由doCreateWorker()方法实现。
- * executeOnece()方法执行最基本的拉取数据放入队列的操作，已经队列满时的fullBack。
+ * executeOnce()方法执行最基本的拉取数据放入队列的操作，已经队列满时的fullBack。
  *
  * @author 白杨
  * DateTime:2023/8/22 10:43
  */
-public abstract class AbstrctMasterExecutor<T> implements Master<T> {
+public abstract class AbstractMasterExecutor<T> implements Master<T> {
 
     /**
      * 任务名称
@@ -49,7 +49,7 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
      */
     protected Consumer<T> workerConsumer;
 
-    public AbstrctMasterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
+    public AbstractMasterExecutor(String name, ExecutorProperties processProperties, BlockingQueue<T> dataQueue, MasterPuller<T> masterPuller, Consumer<T> workerConsumer) {
         this.name = name;
         this.processProperties = processProperties;
         this.dataQueue = dataQueue;
@@ -92,7 +92,7 @@ public abstract class AbstrctMasterExecutor<T> implements Master<T> {
      * @param fullBack 当dataQueue满了无法放入数据时，调用该方法
      * @return 队列放入失败时返回false，所有数据成功放入队列返回true
      */
-    protected boolean executeOnece(Consumer<List<T>> fullBack) {
+    protected boolean executeOnce(Consumer<List<T>> fullBack) {
         List<T> dataList = this.masterPuller.pull();//拉取数据
         for (int i = 0; i < dataList.size(); i++) {
             T data = dataList.get(i);

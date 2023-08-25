@@ -24,7 +24,7 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
     private static final Logger logger = LoggerFactory.getLogger(SimpleWorker.class);
     public static final int CORE_WOKER = 1; //核心woker 会一直存活
     public static final int TEMPORARY_WORKER = 2; //临时worker 会首先存活时间
-    public final int curWokerRole; //当前woker角色：核心(CORE_WOKER)/临时(TEMPORARY_WORKER)
+    public final int curWorkerRole; //当前worker角色：核心(CORE_WORKER)/临时(TEMPORARY_WORKER)
     /**
      * 数据队列
      */
@@ -68,7 +68,7 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
 
     public SimpleWorker(String name, int workerId, Semaphore semaphore, FSM fsm, Tuple2<Lock, Condition> startNotify,
                         BlockingQueue<T> dataQueue, Consumer<T> workerConsumer, ExecutorProperties processProperties,
-                        Consumer<Worker<T>> shutdownCall, int wokerRole) {
+                        Consumer<Worker<T>> shutdownCall, int workerRole) {
         super(name);
         this.workerId = workerId;
         this.dataQueue = dataQueue;
@@ -78,7 +78,7 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
         this.processProperties = processProperties;
         this.startNotify = startNotify;
         this.shutdownCall = shutdownCall;
-        this.curWokerRole = wokerRole;
+        this.curWorkerRole = workerRole;
     }
 
     /**
@@ -89,7 +89,7 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
     public void run() {
         semaphore.release(); //释放信号量+1
         long workerPullTimeout = processProperties.getWorkerPullTimeout(); // 拉取数据超时时间
-        long alivetime = this.curWokerRole == SimpleWorker.TEMPORARY_WORKER ? processProperties.getWorkerAlivetime() : -1;//存活时间
+        long alivetime = this.curWorkerRole == SimpleWorker.TEMPORARY_WORKER ? processProperties.getWorkerAlivetime() : -1;//存活时间
         long restAliveTime = Long.MAX_VALUE;//线程剩余存活时间，只有当Worker非核心时，会计算剩余存活时间
         long beginTime = System.nanoTime(); //起始时间,单位纳秒
         while (true) {
@@ -146,7 +146,6 @@ public class SimpleWorker<T> extends Thread implements Worker<T> {
      */
     public void close() {
         this.closeFlag = true; //关闭标志
-        this.interrupt(); // 中断等待
     }
 
     public void fastConsume() {

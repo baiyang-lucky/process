@@ -1,6 +1,6 @@
 package com.tbox.process;
 
-import com.tbox.process.support.MsterExecutor;
+import com.tbox.process.support.MasterExecutor;
 import com.tbox.process.support.ExecutorContext;
 import com.tbox.process.support.ExecutorProperties;
 import com.tbox.process.support.GlobalExecutorRegistryAgent;
@@ -32,7 +32,7 @@ public class MonitorTest {
                         maxName, maxSize, minName, minSize);
             }
         }).start();
-        ArrayList<MsterExecutor<String>> tasks = new ArrayList<>();
+        ArrayList<MasterExecutor<String>> tasks = new ArrayList<>();
         CountDownLatch countDownLatch = new CountDownLatch(1000);
         for (int i = 0; i < 5; i++) {
             tasks.add(createTask("task" + i, ExecutorProperties.builder()
@@ -45,13 +45,13 @@ public class MonitorTest {
                     .build(), countDownLatch));
         }
         long s = System.nanoTime();
-        for (MsterExecutor<String> task : tasks) {
+        for (MasterExecutor<String> task : tasks) {
 //            Thread.sleep(1000);
             task.start();
         }
         countDownLatch.await();
         System.out.println(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - s));
-        for (MsterExecutor<String> task : tasks) {
+        for (MasterExecutor<String> task : tasks) {
             Thread.sleep(1000);
             task.shutdownNow();
         }
@@ -71,8 +71,8 @@ public class MonitorTest {
         Thread.sleep(1000 * 60);
     }
 
-    public static MsterExecutor<String> createTask(String name, ExecutorProperties properties, CountDownLatch countDownLatch) {
-        return new MsterExecutor.Builder<String>()
+    public static MasterExecutor<String> createTask(String name, ExecutorProperties properties, CountDownLatch countDownLatch) {
+        return new MasterExecutor.Builder<String>()
                 .name(name)
                 .executorProperties(properties)
                 .masterPuller(() -> {

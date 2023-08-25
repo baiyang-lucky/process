@@ -5,6 +5,7 @@ import com.tbox.process.type.Event;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 
@@ -14,19 +15,14 @@ class ProcessApplicationTests {
     }
 
     public static void main(String[] args) throws InterruptedException {
-//        Thread t = new Thread(() -> {
-//            while (true) {
-//                try {
-//                    System.out.println("执行");
-//                    Thread.sleep(5000);
-//                } catch (InterruptedException e) {
-//                    continue;
-//                }
-//            }
-////            System.out.println("中断结束");
-//        });
-//        t.start();
-//        Thread.sleep(1000);
+        Thread t = new Thread(() -> {
+            while (true) {
+                System.out.println(new Random().nextInt(100));
+            }
+        });
+        t.start();
+        Thread.sleep(1000);
+        t.stop();
 //        while (true)
 //            t.interrupt();
 //        System.out.println("触发中断");
